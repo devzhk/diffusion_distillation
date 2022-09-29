@@ -1,0 +1,6 @@
+.svn
+exp
+ckpts
+log
+wandb
+**/__pycache__/
