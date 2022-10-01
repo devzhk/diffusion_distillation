@@ -1,7 +1,5 @@
 import os
-from functools import partial
 import time
-from typing import Any
 from argparse import ArgumentParser
 from tqdm import tqdm
 
@@ -9,14 +7,28 @@ import numpy as onp
 import jax
 import jax.numpy as jnp
 import tensorflow as tf
+
 os.environ['XLA_PYTHON_CLIENT_PREALLOCATE']='False'
-# tf.config.experimental.set_visible_devices([], "GPU")
 import flax
 import flax.linen as nn
 from PIL import Image
 import diffusion_distillation
 from diffusion_distillation import utils
+import lmdb
 from cleanfid import fid
+
+
+def save2db(traj_batch, env, curr):
+    '''
+    Input: 
+        traj: ndarray, (B, T, C, H, W)
+    '''
+    num_traj = traj_batch.shape[0]
+    with env.begin(write=True) as txn:
+        for i in range(num_traj):
+            key = f'{curr+i}'.encode()
+            txn.put(key, traj_batch[i])
+    return curr + num_traj
 
 
 def save2dir(images, outdir, curr):
@@ -111,43 +123,50 @@ def evaluate_teacher(args):
     B = args.batchsize
     local_b = B // num_gpus
     num_batches = N // B
-    sample_key = jax.random.PRNGKey(0)
+    sample_key = jax.random.PRNGKey(1)
     z1_shape = (32, 32, 3)
     num_steps = args.num_steps
+    curr = 0
+    curr_jpg = 0
     outdir = f'exp/cifar_{num_steps}'
     os.makedirs(outdir, exist_ok=True)
-    curr = 0
+    os.makedirs(args.db_path, exist_ok=True)
+    env = lmdb.open(args.db_path, map_size=200*1024*1024*1024, readahead=False)
     for batch_idx in tqdm(range(num_batches)):
         y_key, z_key, gen_key, sample_key = jax.random.split(sample_key, 4)
-        # y = sample_labels(
-        #     y_key, num_classes=teacher.model.num_classes, num=B,
-        #     limit_classes=args.distillation.classes)
         y = None
-        # if y is not None:
-        #     assert y.shape == (B,)
-        #     y = y.reshape(
-        #         args.dist.local_device_count, local_b)
 
         z1 = jax.random.normal(
             z_key, shape=(num_gpus, local_b, *z1_shape))
-        images_batch = sample_ddim(
+        traj_list = sample_ddim(
             jax.random.split(gen_key, num_gpus),
             teacher.teacher_state.ema_params,
             z1, y, num_steps=num_steps)
-        images_batch = images_batch[-1]
-        images_batch = images_batch.reshape(B, *images_batch.shape[2:])
-        images_batch= jnp.clip(utils.unnormalize_data(images_batch), 0, 255)
+        # T, num_gpus, local_b, H, W, C
+        # images_batch = images_batch.reshape(B, *images_batch.shape[2:])
+        # images_batch= jnp.clip(utils.unnormalize_data(images_batch), 0, 255)
         # Save a grid of samples used for FID computation.
-        img_batch = jax.device_get(images_batch).astype(onp.uint8)
-        curr = save2dir(img_batch, outdir, curr)
+        traj_list = jax.device_get(traj_list)
+        traj_batch = onp.stack(traj_list, axis=2)   # B, T, H, W, C
+        
+        traj_batch = traj_batch.reshape(B, *traj_batch.shape[2:])
+        traj_batch = traj_batch.transpose(0, 4, 1, 2, 3)  # B, C, T, H, W
+        traj_batch = onp.ascontiguousarray(traj_batch)
+        curr = save2db(traj_batch=traj_batch, env=env, curr=curr)
+        
+    with env.begin(write=True) as txn:
+        key = 'length'.encode()
+        value = str(curr).encode()
+        txn.put(key, value)
 
-
-    score = fid.compute_fid(outdir, dataset_name='cifar10', dataset_res=32, dataset_split='train', mode='legacy_tensorflow')
-    print(score)
+    print(f'Write {curr} data to {args.db_path}')
+    # score = fid.compute_fid(outdir, dataset_name='cifar10', dataset_res=32, dataset_split='train', mode='legacy_tensorflow')
+    # print(score)
 
 
 if __name__ == '__main__':
     parser = ArgumentParser(description='parser for DDIM sampler')
+    parser.add_argument('--db_path', type=str, default='data/cifar8/lmdb')
     parser.add_argument('--ckpt_path', type=str, default='ckpts/cifar_8')
     parser.add_argument('--num_steps', type=int, default=8)
     parser.add_argument('--num_imgs', type=int, default=50_000)

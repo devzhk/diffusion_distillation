@@ -1,7 +1,5 @@
 import os
-from functools import partial
 import time
-from typing import Any
 from argparse import ArgumentParser
 from tqdm import tqdm
 
@@ -10,22 +8,25 @@ import jax
 import jax.numpy as jnp
 import tensorflow as tf
 os.environ['XLA_PYTHON_CLIENT_PREALLOCATE']='False'
-# tf.config.experimental.set_visible_devices([], "GPU")
 import flax
 import flax.linen as nn
 from PIL import Image
 import diffusion_distillation
 from diffusion_distillation import utils
-from cleanfid import fid
+import lmdb
 
 
-def save2dir(images, outdir, curr):
-    num_imgs = images.shape[0]
-    for j in range(num_imgs):
-        im = Image.fromarray(images[j])
-        img_path = os.path.join(outdir, f'{j + curr}.jpg')
-        im.save(img_path, quality=100, subsampling=0)    
-    return curr + num_imgs
+def save2db(traj_batch, env, curr):
+    '''
+    Input: 
+        traj: ndarray, (B, T, C, H, W)
+    '''
+    num_traj = traj_batch.shape[0]
+    with env.begin(write=True) as txn:
+        for i in range(num_traj):
+            key = f'{curr+i}'.encode()
+            txn.put(key, traj_batch[i])
+    return curr + num_traj
 
 
 def load_teacher(args, config):
@@ -94,15 +95,16 @@ def evaluate_teacher(args):
     ddim_step_fn_p = jax.pmap(ddim_step_fn, axis_name='batch')
     assert teacher.config.model.mean_type == 'x'
 
-    def sample_ddim(rng, teacher_params, z, y, num_steps):
+    def sample_ddim(rng, teacher_params, z, y, num_steps, t_idx):
         dt = 1. / num_steps
         xt = z
         x_list = [xt]
-        for timestep in jnp.linspace(1., dt, num_steps):
+        for i, timestep in enumerate(jnp.linspace(1., dt, num_steps)):
             t = jnp.full(z.shape[:2], fill_value=timestep, dtype=jnp.float32)
             s = t - dt
             xhat, xt = ddim_step_fn_p(teacher_params, xt, y, t, s)
-            x_list.append(xhat)
+            if i in t_idx:
+                x_list.append(xhat)
         return x_list
 
     num_gpus = jax.local_device_count()
@@ -114,9 +116,16 @@ def evaluate_teacher(args):
     sample_key = jax.random.PRNGKey(0)
     z1_shape = (32, 32, 3)
     num_steps = args.num_steps
-    outdir = f'exp/cifar_{num_steps}'
-    os.makedirs(outdir, exist_ok=True)
     curr = 0
+    db_path = os.path.join(args.db_path, args.time, 'lmdb')
+    os.makedirs(db_path, exist_ok=True)
+    env = lmdb.open(db_path, map_size=200*1024*1024*1024, readahead=False)
+    assert num_steps == 512
+    if args.time == 'quad':
+        t_idx = [num_steps - 1 - 2 * i * i for i in range(17)]
+    else:
+        step = num_steps // 16
+        t_idx = [step * i - 1 for i in range(17)]
     for batch_idx in tqdm(range(num_batches)):
         y_key, z_key, gen_key, sample_key = jax.random.split(sample_key, 4)
         # y = sample_labels(
@@ -130,27 +139,36 @@ def evaluate_teacher(args):
 
         z1 = jax.random.normal(
             z_key, shape=(num_gpus, local_b, *z1_shape))
-        images_batch = sample_ddim(
+        traj_list = sample_ddim(
             jax.random.split(gen_key, num_gpus),
             teacher.teacher_state.ema_params,
-            z1, y, num_steps=num_steps)
-        images_batch = images_batch[-1]
-        images_batch = images_batch.reshape(B, *images_batch.shape[2:])
-        images_batch= jnp.clip(utils.unnormalize_data(images_batch), 0, 255)
+            z1, y, num_steps=num_steps, t_idx=t_idx)
+        # T, num_gpus, local_b, H, W, C
+        # images_batch = images_batch.reshape(B, *images_batch.shape[2:])
+        # images_batch= jnp.clip(utils.unnormalize_data(images_batch), 0, 255)
         # Save a grid of samples used for FID computation.
-        img_batch = jax.device_get(images_batch).astype(onp.uint8)
-        curr = save2dir(img_batch, outdir, curr)
+        traj_list = jax.device_get(traj_list)
+        traj_batch = onp.stack(traj_list, axis=2)   # B, T, H, W, C
+        traj_batch = traj_batch.reshape(B, *traj_batch.shape[2:])
+        traj_batch = traj_batch.transpose(0, 4, 1, 2, 3)  # B, C, T, H, W
+        traj_batch = onp.ascontiguousarray(traj_batch)
+        curr = save2db(traj_batch=traj_batch, env=env, curr=curr)
 
+    with env.begin(write=True) as txn:
+        key = 'length'.encode()
+        value = str(curr).encode()
+        txn.put(key, value)
 
-    score = fid.compute_fid(outdir, dataset_name='cifar10', dataset_res=32, dataset_split='train', mode='legacy_tensorflow')
-    print(score)
+    print(f'Write {curr} data to {args.db_path}')
 
 
 if __name__ == '__main__':
     parser = ArgumentParser(description='parser for DDIM sampler')
-    parser.add_argument('--ckpt_path', type=str, default='ckpts/cifar_8')
-    parser.add_argument('--num_steps', type=int, default=8)
-    parser.add_argument('--num_imgs', type=int, default=50_000)
-    parser.add_argument('--batchsize', type=int, default=2000)
+    parser.add_argument('--db_path', type=str, default='data/cifar_origin')
+    parser.add_argument('--ckpt_path', type=str, default='ckpts/cifar_original')
+    parser.add_argument('--time', type=str, default='uniform')
+    parser.add_argument('--num_steps', type=int, default=512)
+    parser.add_argument('--num_imgs', type=int, default=16_000)
+    parser.add_argument('--batchsize', type=int, default=1000)
     args = parser.parse_args()
     evaluate_teacher(args)

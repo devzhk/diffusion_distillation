@@ -1,5 +1,6 @@
 .svn
 exp
+data
 ckpts
 log
 wandb
