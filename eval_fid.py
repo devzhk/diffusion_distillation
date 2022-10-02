@@ -151,6 +151,6 @@ if __name__ == '__main__':
     parser.add_argument('--ckpt_path', type=str, default='ckpts/cifar_8')
     parser.add_argument('--num_steps', type=int, default=8)
     parser.add_argument('--num_imgs', type=int, default=50_000)
-    parser.add_argument('--batchsize', type=int, default=2000)
+    parser.add_argument('--batchsize', type=int, default=1000)
     args = parser.parse_args()
     evaluate_teacher(args)
