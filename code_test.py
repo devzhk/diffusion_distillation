@@ -33,5 +33,20 @@ def test_data_load():
     score = fid.compute_fid(savedir, dataset_name='cifar10', dataset_res=32, dataset_split='train', mode='legacy_tensorflow')
     print(score)
 
+
+def test_db():
+    traj_shape = (3, 17, 32, 32)
+    db_path = 'data/cifar_origin/uniform/lmdb'
+    env = lmdb.open(db_path, readonly=True, readahead=False, lock=False, meminit=False)
+    with env.begin(write=False, buffers=True) as txn:
+        idx = 250 * 1000 + 100
+        key = f'{idx}'.encode()
+        value = txn.get(key)
+        val = np.frombuffer(value, dtype=np.float32)
+        data = val.reshape(traj_shape)
+        print(data.shape)
+
+
 if __name__ == '__main__':
-    test_data_load()
+    # test_data_load()
+    test_db()

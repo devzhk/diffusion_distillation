@@ -112,14 +112,15 @@ def evaluate_teacher(args):
     N = args.num_imgs
     B = args.batchsize
     local_b = B // num_gpus
-    num_batches = N // B
-    sample_key = jax.random.PRNGKey(0)
+
+    num_batches = N // B - args.startbatch
+    sample_key = jax.random.PRNGKey(123)
     z1_shape = (32, 32, 3)
     num_steps = args.num_steps
-    curr = 0
+    curr = B * args.startbatch
     db_path = os.path.join(args.db_path, args.time, 'lmdb')
     os.makedirs(db_path, exist_ok=True)
-    env = lmdb.open(db_path, map_size=200*1024*1024*1024, readahead=False)
+    env = lmdb.open(db_path, map_size=300*1024*1024*1024, readahead=False)
     assert num_steps == 512
     if args.time == 'quad':
         t_idx = [num_steps - 1 - 2 * i * i for i in range(17)]
@@ -170,5 +171,6 @@ if __name__ == '__main__':
     parser.add_argument('--num_steps', type=int, default=512)
     parser.add_argument('--num_imgs', type=int, default=16_000)
     parser.add_argument('--batchsize', type=int, default=1000)
+    parser.add_argument('--startbatch', type=int, default=0, help='the batch id to start from')
     args = parser.parse_args()
     evaluate_teacher(args)
