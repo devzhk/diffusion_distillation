@@ -11,10 +11,13 @@ import diffusion_distillation
 from diffusion_distillation import mydpm, mymodel
 import lmdb
 
-from utils.helper import get_random_label, save2db, gather, load_param
+from utils.helper import get_random_label, save2db, gather, load_param, download_ckpt
 
 
 def generate2db(args):
+    if not os.path.exists(args.ckpt_path):
+        download_ckpt(args.ckpt_path)
+
     conditional = False
     if args.dataset == 'cifar10':
         config = diffusion_distillation.config.cifar_distill.get_config()
@@ -78,9 +81,9 @@ def generate2db(args):
         y = get_random_label(num_gpus, local_b, num_class=1000, key=y_key) if conditional else None
         
         init_x = jax.random.normal(x_key, shape=(num_gpus, local_b, *x_shape))
-        trajs = sampler.sample_loop(loaded_params, init_x, y, args.num_steps, logsnr_schedule_fn, clip_x)
-        # traj_batch = gather(trajs)
-        # curr = save2db(traj_batch=traj_batch, env=env, curr=curr)
+        trajs = sampler.sample_loop(loaded_params, init_x, y, args.num_steps, logsnr_schedule_fn, clip_x, args.save_step)
+        traj_batch = gather(trajs)
+        curr = save2db(traj_batch=traj_batch, env=env, curr=curr)
         if conditional:
             label_list.append(y)
     # write length
@@ -107,5 +110,6 @@ if __name__ == '__main__':
     parser.add_argument('--batchsize', type=int, default=500)
     parser.add_argument('--startbatch', type=int, default=0, help='the batch id to start from')
     parser.add_argument('--dataset', type=str, default='cifar10')
+    parser.add_argument('--save_step', type=int, default=1)
     args = parser.parse_args()
     generate2db(args)

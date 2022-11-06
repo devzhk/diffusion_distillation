@@ -1,10 +1,12 @@
 import os
+from tqdm import tqdm
 import numpy as onp
 import jax
 import jax.numpy as jnp
 from PIL import Image
 import flax
 from flax import serialization
+import requests
 
 
 def get_random_label(num_gpu, batch, num_class, key):
@@ -68,3 +70,25 @@ def gather(arr_list):
     arr_batch = arr_batch.transpose(0, 4, 1, 2, 3)  # (batchsize, C, T, H, W)
     arr_batch = onp.ascontiguousarray(arr_batch)
     return arr_batch
+
+
+def download_ckpt(file_path):
+    url_dict = {
+        'imagenet_16': 'https://hkzdata.s3.us-west-2.amazonaws.com/SBM/diffusion_distillation/imagenet_16', 
+        'imagenet_8': 'https://hkzdata.s3.us-west-2.amazonaws.com/SBM/diffusion_distillation/imagenet_8', 
+        'imagenet_original': 'https://hkzdata.s3.us-west-2.amazonaws.com/SBM/diffusion_distillation/imagenet_original'
+    }
+    if 'imagenet_16' in file_path:
+        url = url_dict['imagenet_16']
+    elif 'imagenet_8' in file_path:
+        url = url_dict['imagenet_8']
+    elif 'imagenet_original' in file_path:
+        url = url_dict['imagenet_original']
+    
+    print('Start downloading...')
+    with requests.get(url, stream=True) as r:
+        r.raise_for_status()
+        with open(file_path, 'wb') as f:
+            for chunk in tqdm(r.iter_content(chunk_size=1024 * 1024 * 1024)):
+                f.write(chunk)
+    print('Complete')

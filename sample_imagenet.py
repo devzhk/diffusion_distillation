@@ -61,13 +61,13 @@ def generate_samples(args):
                         'speedboat': 814, 'reef': 973, 'sports_car': 817,
                         'race_car': 751, 'model_t': 661, 'truck': 867}
     # labels = imagenet_classes['truck'] * jnp.ones((batch,), dtype=jnp.int32)
-    outdir = 'exp/imagenet8/figs'
+    outdir = 'exp/imagenet16/figs'
     os.makedirs(outdir, exist_ok=True)
 
     curr = 0
     for i in tqdm(range(num_batchs)):
         labels = jax.random.randint(jax.random.PRNGKey(i), (batch, ), minval=0, maxval=1000, dtype=jnp.int32)
-        samples = model.samples_fn(rng=jax.random.PRNGKey(i), labels=labels, params=loaded_params, num_steps=8)
+        samples = model.samples_fn(rng=jax.random.PRNGKey(i), labels=labels, params=loaded_params, num_steps=16)
         samples = jax.device_get(samples).astype(onp.uint8)
         curr = save2dir(samples, outdir, curr)
     # outdir = 'data/imagenet8/lmdb'
@@ -84,8 +84,8 @@ if __name__ == '__main__':
     parser.add_argument('--ckpt_path', type=str, default='ckpts/cifar_original')
     parser.add_argument('--time', type=str, default='uniform')
     parser.add_argument('--num_steps', type=int, default=512)
-    parser.add_argument('--num_imgs', type=int, default=25_000)
-    parser.add_argument('--batchsize', type=int, default=100)
+    parser.add_argument('--num_imgs', type=int, default=50_000)
+    parser.add_argument('--batchsize', type=int, default=200)
     parser.add_argument('--startbatch', type=int, default=0, help='the batch id to start from')
     args = parser.parse_args()
     generate_samples(args)

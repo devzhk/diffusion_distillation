@@ -8,6 +8,7 @@ from PIL import Image
 from cleanfid import fid
 import jax
 import functools
+from utils.helper import download_ckpt
 
 
 def save2jpg(img, savedir, i):
@@ -104,10 +105,18 @@ def test_for_loop():
     print(final)
 
 
+def test_download():
+    ckpt_path = 'ckpts/imagenet_original'
+    if not os.path.exists(ckpt_path):
+        download_ckpt(ckpt_path)
+    
+
+
 if __name__ == '__main__':
     # test_data_load()
     # test_db()
     # read_db()
     # test_pmap()
     # test_bc()
-    test_for_loop()
+    # test_for_loop()
+    test_download()

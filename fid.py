@@ -16,7 +16,7 @@ import scipy.linalg
 import torch
 import dnnlib
 from torch_utils import distributed as dist
-from training import dataset
+from torch_utils import dataset
 
 #----------------------------------------------------------------------------
 

@@ -177,7 +177,7 @@ class Model:
     return x_pred_t, z_s_pred
 
   def sample_loop(self, params, init_x, y, num_steps,
-                  logsnr_schedule_fn, clip_x):
+                  logsnr_schedule_fn, clip_x, save_step):
     '''
     Args:
       - init_x: (num_gpus, local_b, *x_shape)
@@ -194,5 +194,6 @@ class Model:
     # loop over t = num_steps-1, ..., 0
     for i in reversed(range(num_steps)):
       xhat, zt = ddim_step_fn(i, zt, y, num_steps, logsnr_schedule_fn, clip_x, params)
-      x_list.append(xhat)
+      if i % save_step == 0:
+        x_list.append(xhat)
     return x_list
