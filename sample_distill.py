@@ -11,33 +11,13 @@ import tensorflow as tf
 os.environ['XLA_PYTHON_CLIENT_PREALLOCATE']='False'
 import flax
 import flax.linen as nn
-from PIL import Image
+
 import diffusion_distillation
 from diffusion_distillation import utils
 import lmdb
 from cleanfid import fid
 
-
-def save2db(traj_batch, env, curr):
-    '''
-    Input: 
-        traj: ndarray, (B, T, C, H, W)
-    '''
-    num_traj = traj_batch.shape[0]
-    with env.begin(write=True) as txn:
-        for i in range(num_traj):
-            key = f'{curr+i}'.encode()
-            txn.put(key, traj_batch[i])
-    return curr + num_traj
-
-
-def save2dir(images, outdir, curr):
-    num_imgs = images.shape[0]
-    for j in range(num_imgs):
-        im = Image.fromarray(images[j])
-        img_path = os.path.join(outdir, f'{j + curr}.jpg')
-        im.save(img_path, quality=100, subsampling=0)    
-    return curr + num_imgs
+from utils.helper import save2db, get_random_label
 
 
 def load_teacher(args, config):
@@ -65,7 +45,14 @@ def load_teacher(args, config):
 
 
 def evaluate_teacher(args):
-    config = diffusion_distillation.config.cifar_distill.get_config()
+    conditional = False
+    if args.dataset == 'cifar10':
+        config = diffusion_distillation.config.cifar_distill.get_config()
+    elif args.dataset == 'imagenet':
+        config = diffusion_distillation.config.imagenet64_distill.get_config()
+        conditional = True
+    else:
+        raise ValueError('only cifar10 or imagenet is supported')
     teacher = load_teacher(args, config)
     teacher.teacher_state = flax.jax_utils.replicate(teacher.teacher_state)
 
@@ -128,13 +115,18 @@ def evaluate_teacher(args):
     num_steps = args.num_steps
     curr = 0
     curr_jpg = 0
-    outdir = f'exp/cifar_{num_steps}'
+    dataset = args.dataset
+    outdir = f'exp/{dataset}_{num_steps}'
     os.makedirs(outdir, exist_ok=True)
     os.makedirs(args.db_path, exist_ok=True)
     env = lmdb.open(args.db_path, map_size=200*1024*1024*1024, readahead=False)
+    label_list = []
     for batch_idx in tqdm(range(num_batches)):
         y_key, z_key, gen_key, sample_key = jax.random.split(sample_key, 4)
-        y = None
+        if conditional:
+            y = get_random_label(num_gpus, local_b, num_class=1000, key=y_key)
+        else:
+            y = None
 
         z1 = jax.random.normal(
             z_key, shape=(num_gpus, local_b, *z1_shape))
@@ -153,13 +145,20 @@ def evaluate_teacher(args):
         traj_batch = traj_batch.transpose(0, 4, 1, 2, 3)  # B, C, T, H, W
         traj_batch = onp.ascontiguousarray(traj_batch)
         curr = save2db(traj_batch=traj_batch, env=env, curr=curr)
-        
+        label_list.append(jax.device_get(y))
+
     with env.begin(write=True) as txn:
         key = 'length'.encode()
         value = str(curr).encode()
         txn.put(key, value)
-
     print(f'Write {curr} data to {args.db_path}')
+    if conditional:
+        label_dir = os.path.join(outdir, 'labels')
+        os.makedirs(label_dir, exist_ok=True)
+        label_path = os.path.join(label_dir, 'label.npy')
+        labels = onp.concatenate(label_list, axis=None)
+        onp.save(label_path, labels)
+        print(f'labels saved to {label_path}')
     # score = fid.compute_fid(outdir, dataset_name='cifar10', dataset_res=32, dataset_split='train', mode='legacy_tensorflow')
     # print(score)
 
@@ -171,5 +170,6 @@ if __name__ == '__main__':
     parser.add_argument('--num_steps', type=int, default=8)
     parser.add_argument('--num_imgs', type=int, default=50_000)
     parser.add_argument('--batchsize', type=int, default=2000)
+    parser.add_argument('--dataset', type=str, default='cifar10')
     args = parser.parse_args()
     evaluate_teacher(args)

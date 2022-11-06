@@ -4,5 +4,5 @@ data
 ckpts
 log
 wandb
-**/__pycache__/
+**/__pycache__/**
 .idea

@@ -146,7 +146,7 @@ def check_and_convert_gcs_filepath(filepath, raise_if_not_gcs=False):
 def restore_from_path(ckpt_path, target):
   ckpt_path = check_and_convert_gcs_filepath(ckpt_path)
   logging.info('Restoring checkpoint from %s', ckpt_path)
-  with gfile.GFile(ckpt_path, 'rb') as fp:
+  with open(ckpt_path, 'rb') as fp:
     return serialization.from_bytes(target, fp.read())
 
 

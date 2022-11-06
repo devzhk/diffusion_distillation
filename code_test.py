@@ -2,9 +2,12 @@ import os
 from tqdm import tqdm
 import lmdb
 import numpy as np
+import jax.numpy as jnp
 
 from PIL import Image
 from cleanfid import fid
+import jax
+import functools
 
 
 def save2jpg(img, savedir, i):
@@ -47,6 +50,64 @@ def test_db():
         print(data.shape)
 
 
+def read_db():
+    db_path = 'data/cifar8/lmdb'
+    env = lmdb.open(db_path, readonly=True, readahead=False)
+    with env.begin(write=False) as txn:
+        key = 'length'.encode()
+        val = int(str(txn.get(key), 'utf-8'))
+        print(val)
+
+class Model(object):
+    def __init__(self) -> None:
+        self.num = 100
+
+    
+    def conv(self, x, w, p, j, logsnr_fn):
+        output = []
+        for i in range(1, len(x) - 1):
+            output.append(jnp.dot(x[i-1:i+2], w))
+        output = jnp.array(output) * self.num / p + logsnr_fn(j)
+        return output
+
+
+def test_pmap():
+    w = np.array([2., 3., 4.])
+    model = Model()
+    n_devices = jax.local_device_count()
+    xs = np.arange(5 * n_devices).reshape(-1, 5)
+    ws = np.stack([w] * n_devices)
+
+    logsnr_fn = lambda t: t * 2.0
+    conv_fn = jax.pmap(model.conv, axis_name='p', static_broadcasted_argnums=[2, 3, 4])
+
+    res, i, j = conv_fn(xs, ws, 10, 1.0, logsnr_fn)
+    print(res, i, j)
+
+
+def test_bc():
+    w = jax.random.normal(jax.random.PRNGKey(1), (4, 5, 3))
+    x = 2.0
+    out = w * x
+    print(out.shape)
+
+
+def test_for_loop():
+    
+    def body_fn(i, x):
+        jax.debug.print('dtype {x}', x=i.dtype)
+        res = x + i
+        return res
+
+    init_x = jnp.array([1.0])
+    final = jax.lax.fori_loop(0, 10, body_fun=body_fn, init_val=init_x)
+    print(final)
+
+
 if __name__ == '__main__':
     # test_data_load()
-    test_db()
+    # test_db()
+    # read_db()
+    # test_pmap()
+    # test_bc()
+    test_for_loop()
