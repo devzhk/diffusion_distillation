@@ -1,4 +1,4 @@
-CUDA_VISIBLE_DEVICES=2,0 python3 sampling.py \
+CUDA_VISIBLE_DEVICES=0,3 python3 sampling.py \
 --data_dir data/imagenet8 \
 --ckpt_path ckpts/imagenet_8 \
 --num_imgs 50000 \

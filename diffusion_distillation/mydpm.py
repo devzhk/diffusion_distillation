@@ -116,8 +116,8 @@ class Model:
     self.logvar_coeff = logvar_coeff
     self.target_model_fn = target_model_fn
 
-  def _run_model(self, *, z, y, logsnr, model_fn, clip_x):
-    model_output = model_fn(z, logsnr, y)
+  def _run_model(self, *, z, y, logsnr, model_fn, clip_x, params):
+    model_output = model_fn(params, z, logsnr, y)
     if self.mean_type == 'eps':
       model_eps = model_output
     elif self.mean_type == 'x':
@@ -157,7 +157,7 @@ class Model:
             'model_eps': model_eps,
             'model_v': model_v}
 
-  def ddim_step(self, i, z_t, y, num_steps, logsnr_schedule_fn, clip_x):
+  def ddim_step(self, i, z_t, y, num_steps, logsnr_schedule_fn, clip_x, params):
     shape, dtype = z_t.shape, z_t.dtype
     i = jnp.array(i, dtype=dtype)
     logsnr_t = logsnr_schedule_fn((i + 1.)/ num_steps)
@@ -167,7 +167,8 @@ class Model:
         y=y,
         logsnr=jnp.full((shape[0],), logsnr_t),
         model_fn=self.model_fn,
-        clip_x=clip_x)
+        clip_x=clip_x, 
+        params=params)
     x_pred_t = model_out['model_x']
     eps_pred_t = model_out['model_eps']
     stdv_s = jnp.sqrt(nn.sigmoid(-logsnr_s))
@@ -175,7 +176,7 @@ class Model:
     z_s_pred = alpha_s * x_pred_t + stdv_s * eps_pred_t
     return x_pred_t, z_s_pred
 
-  def sample_loop(self, init_x, y, num_steps,
+  def sample_loop(self, params, init_x, y, num_steps,
                   logsnr_schedule_fn, clip_x):
     '''
     Args:
@@ -192,6 +193,6 @@ class Model:
     x_list = [init_x]
     # loop over t = num_steps-1, ..., 0
     for i in reversed(range(num_steps)):
-      xhat, zt = ddim_step_fn(i, zt, y, num_steps, logsnr_schedule_fn, clip_x)
+      xhat, zt = ddim_step_fn(i, zt, y, num_steps, logsnr_schedule_fn, clip_x, params)
       x_list.append(xhat)
     return x_list
