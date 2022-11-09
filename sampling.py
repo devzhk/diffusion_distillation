@@ -6,6 +6,7 @@ import numpy as onp
 import jax
 
 os.environ['XLA_PYTHON_CLIENT_PREALLOCATE']='False'
+os.environ['XLA_PYTHON_CLIENT_ALLOCATOR']='platform'
 import flax
 import diffusion_distillation
 from diffusion_distillation import mydpm, mymodel
