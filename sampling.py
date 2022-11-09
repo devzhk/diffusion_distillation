@@ -17,6 +17,7 @@ from utils.helper import get_random_label, save2db, gather, load_param, download
 
 def generate2db(args):
     if not os.path.exists(args.ckpt_path):
+        os.makedirs('ckpts', exist_ok=True)
         download_ckpt(args.ckpt_path)
 
     conditional = False
