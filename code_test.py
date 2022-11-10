@@ -5,10 +5,11 @@ import numpy as np
 import jax.numpy as jnp
 
 from PIL import Image
-from cleanfid import fid
+# from cleanfid import fid
 import jax
 import functools
 from utils.helper import download_ckpt
+from multiprocessing import Pool
 
 
 def save2jpg(img, savedir, i):
@@ -110,6 +111,16 @@ def test_download():
     if not os.path.exists(ckpt_path):
         download_ckpt(ckpt_path)
     
+def mp_fn(args):
+    a, b= args
+    return a + b
+
+
+def test_mp():
+    with Pool(processes=8) as pool:
+        arg_list = [(i, i /2) for i in range(16)]
+        for res in pool.imap_unordered(mp_fn, arg_list):
+            print(res)
 
 
 if __name__ == '__main__':
@@ -119,4 +130,5 @@ if __name__ == '__main__':
     # test_pmap()
     # test_bc()
     # test_for_loop()
-    test_download()
+    # test_download()
+    test_mp()
