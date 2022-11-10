@@ -63,7 +63,7 @@ def generate2db(args):
     num_imgs = args.num_imgs
     batchsize = args.batchsize
     local_b = batchsize // num_gpus
-    num_batches = num_imgs // batchsize
+    num_batches = num_imgs // batchsize - args.startbatch
     sample_key = jax.random.PRNGKey(args.seed)
     
     
