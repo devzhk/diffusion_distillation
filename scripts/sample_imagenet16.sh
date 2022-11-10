@@ -8,4 +8,5 @@ python3 sampling.py \
 --batchsize 2048 \
 --num_steps 16 \
 --dataset imagenet \
---save_step 2
+--save_step 2 \
+--seed 1

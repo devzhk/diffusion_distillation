@@ -64,7 +64,7 @@ def generate2db(args):
     batchsize = args.batchsize
     local_b = batchsize // num_gpus
     num_batches = num_imgs // batchsize
-    sample_key = jax.random.PRNGKey(1)
+    sample_key = jax.random.PRNGKey(args.seed)
     
     
     clip_x = config.model.eval_clip_denoised
@@ -73,11 +73,11 @@ def generate2db(args):
     db_path = os.path.join(args.data_dir, 'lmdb')
     os.makedirs(db_path, exist_ok=True)
 
-    env = lmdb.open(db_path, map_size=2000*1024*1024*1024, readahead=False)
+    env = lmdb.open(db_path, map_size=2000*1024*1024*1024, map_async=True, writemap=True, readahead=False)
 
     # sampling
-    label_list = []
-    curr = 0
+    label_list = onp.zeros(args.num_imgs, dtype=onp.int32)
+    curr = args.startbatch * batchsize
     for batch_id in tqdm(range(num_batches)):
         y_key, x_key, gen_key, sample_key = jax.random.split(sample_key, 4)
         y = get_random_label(num_gpus, local_b, num_class=1000, key=y_key) if conditional else None
@@ -87,17 +87,18 @@ def generate2db(args):
         traj_batch = gather(trajs)
         curr = save2db(traj_batch=traj_batch, env=env, curr=curr)
         if conditional:
-            label_list.append(y)
+            labels = jax.device_get(y).reshape(-1)
+            label_list[batch_id * batchsize: (batch_id+1) * batchsize] = labels
     # write length
     with env.begin(write=True) as txn:
         key = 'length'.encode()
-        value = str(curr).encode()
+        value = str(args.num_imgs).encode()
         txn.put(key, value)
     print(f'Write {curr} data to {db_path}')
     if conditional:
-        labels = onp.concatenate(label_list, axis=None)
-        label_path = os.path.join(args.data_dir, 'labels.npy')
-        onp.save(label_path, labels)
+        # labels = onp.concatenate(label_list, axis=None)
+        label_path = os.path.join(args.data_dir, f'labels-{args.startbatch}.npy')
+        onp.save(label_path, label_list)
         print(f'labels saved to {label_path}')
     print('Complete')
 
@@ -111,6 +112,7 @@ if __name__ == '__main__':
     parser.add_argument('--num_imgs', type=int, default=50_000)
     parser.add_argument('--batchsize', type=int, default=500)
     parser.add_argument('--startbatch', type=int, default=0, help='the batch id to start from')
+    parser.add_argument('--seed', type=int, default=1)
     parser.add_argument('--dataset', type=str, default='cifar10')
     parser.add_argument('--save_step', type=int, default=1)
     args = parser.parse_args()
