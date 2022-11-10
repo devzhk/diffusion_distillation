@@ -73,7 +73,7 @@ def generate2db(args):
     db_path = os.path.join(args.data_dir, 'lmdb')
     os.makedirs(db_path, exist_ok=True)
 
-    env = lmdb.open(db_path, map_size=2000*1024*1024*1024, map_async=True, writemap=True, readahead=False)
+    env = lmdb.open(db_path, map_size=1200*1024*1024*1024, map_async=True, writemap=True, readahead=False)
 
     # sampling
     label_list = onp.zeros(args.num_imgs, dtype=onp.int32)

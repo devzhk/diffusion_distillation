@@ -1,7 +1,7 @@
 # pip install --upgrade "jax[cuda]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 # pip install flax optax ml_collections clu tensorflow
 python3 sampling.py \
---data_dir data/imagenet16 \
+--data_dir data/imagenet16_db \
 --ckpt_path ckpts/imagenet_16 \
 --num_imgs 2048000 \
 --batchsize 2048 \
@@ -9,4 +9,4 @@ python3 sampling.py \
 --dataset imagenet \
 --save_step 2 \
 --seed 12 \
---startbatch 25
+--startbatch 0

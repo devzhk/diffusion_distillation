@@ -6,5 +6,5 @@ python3.9 sampling.py \
 --num_steps 16 \
 --dataset imagenet \
 --save_step 2 \
---startbatch 0 \
---seed 123
+--startbatch 20 \
+--seed 124
