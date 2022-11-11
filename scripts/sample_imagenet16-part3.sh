@@ -3,7 +3,7 @@
 python3 sampling.py \
 --data_dir data/imagenet16_db3 \
 --ckpt_path ckpts/imagenet_16 \
---num_imgs 1024000 \
+--num_imgs 409600 \
 --batchsize 2048 \
 --num_steps 16 \
 --dataset imagenet \
