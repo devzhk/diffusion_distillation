@@ -116,5 +116,5 @@ if __name__ == '__main__':
     parser.add_argument('--datadir', type=str, default='data')
     parser.add_argument('--logpath', type=str, default='/results/merge_db.txt')
     args = parser.parse_args()
-    # process_fn(args)
-    generate_labels()
+    process_fn(args)
+    # generate_labels()
