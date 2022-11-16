@@ -111,7 +111,7 @@ def merge_db(target_env, source_env, remn=0):
 
 
 def process_fn(args):
-    log_file = open(args.logpath, 'w')
+    log_file = open(args.logpath, 'a+')
     check_db(log_file)
     target_db = 'data/imagenet16_data/lmdb'
     os.makedirs(target_db, exist_ok=True)
