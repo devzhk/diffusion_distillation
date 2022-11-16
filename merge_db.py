@@ -3,9 +3,14 @@ from tqdm import tqdm
 from argparse import ArgumentParser
 import lmdb
 import numpy as np
+import psutil
 import shutil
-
 import jax
+
+# test_dict = {
+#     'data/imagenet16_db1/lmdb': 132, 
+#     'data/imagenet16_db2/lmdb': 133, 
+# }
 
 seed_dict = {
     'data/imagenet16_db/lmdb': 12, 
@@ -24,46 +29,10 @@ seed_dict = {
     'data/imagenet16_db13/lmdb': 339, 
 }
 
-
-def delete_db(db_dir):
-    if os.path.exists(db_dir):
-        shutil.rmtree(db_dir)
-
-
-def test_os():
-    sub_folders = [f.path for f in os.scandir('data') if f.is_dir()]
-    print(sub_folders)
-
-
-def check_db(db_path):
-    if 'imagenet_db' in db_path and db_path != 'data/imagenet16_db/lmdb':
-        return True
-    else:
-        return False
-
-
-def merge_db(target_env, source_env):
-    curr = target_env.stat()['entries']
-    source_txn = source_env.begin(write=False)
-    with target_env.begin(write=True) as target_txn:
-        cursor = source_txn.cursor()
-        for key, value in cursor:
-            curr_key = f'{curr}'.encode()
-            target_txn.put(curr_key, value)
-            curr += 1
-
-
-def get_num_imgs(db_dir) -> int:
-    env = lmdb.open(db_dir)
-    num_imgs = env.stat()['entries']
-    env.close()
-    return num_imgs
-
-
 def generate_labels():
     # recover setup
     num_gpus = 8
-    batchsize = 2048
+    batchsize = 1000
     local_b = batchsize // num_gpus
     
     db_list = []
@@ -71,11 +40,12 @@ def generate_labels():
     for key, value in seed_dict.items():        
         sample_key = jax.random.PRNGKey(value)
         num_imgs = get_num_imgs(key)
-        if num_imgs % batchsize == 0:
-            num_batches = num_imgs // batchsize
-        else:
-            raise ValueError('number of entries is not divisible by batchsize!')
-        
+        print(num_imgs)
+        # if num_imgs % batchsize == 0:
+            # num_batches = num_imgs // batchsize
+        # else:
+            # raise ValueError('number of entries is not divisible by batchsize!')
+        num_batches = num_imgs // batchsize
         label_arr = np.zeros(num_imgs, dtype=np.int32)
         for batch_id in range(num_batches):
             y_key, x_key, gen_key, sample_key = jax.random.split(sample_key, 4)
@@ -92,20 +62,66 @@ def generate_labels():
     return db_list
 
 
-def process_fn(args):
-    db_folders = generate_labels()
+def get_num_imgs(db_dir) -> int:
+    env = lmdb.open(db_dir)
+    num_imgs = env.stat()['entries']
+    env.close()
+    return num_imgs
+
+
+def delete_db(db_dir):
+    if os.path.exists(db_dir):
+        shutil.rmtree(db_dir)
+
+
+def check_db(logfile):
+    # read labels
+    label_path = 'data/imagenet16_db/labels.npy'
+    labels = np.load(label_path)
+    num_labels = labels.shape[0]
+    # read db entries
+    num_entries = 0
+    for key, value in seed_dict.items():
+        num_imgs = get_num_imgs(key)
+        print(f'{key} contains {num_imgs} entries', file=logfile)
+        num_entries += num_imgs
+    if num_entries == num_labels:
+        print('number of labels matches the number of entries', file=logfile)
+    else:
+        raise ValueError('number of labels does not match the number of entries')
     
-    target_db = 'data/imagenet16_db/lmdb'
+
+def merge_db(target_env, source_env, remn=0):
+    curr = target_env.stat()['entries'] - remn
+    num_source = source_env.stat()['entries']
+    source_txn = source_env.begin(write=False)
+    count = 0
+    
+    target_txn = target_env.begin(write=True)
+
+    cursor = source_txn.cursor()
+    for key, value in cursor:
+        curr_key = f'{curr + count}'.encode()
+        target_txn.put(curr_key, value)
+        count += 1
+        if count % 2048 == 0:
+            target_env.sync(True)
+            target_txn.commit()
+            target_txn = target_env.begin(write=True)
+
+
+def process_fn(args):
     log_file = open(args.logpath, 'w')
-    print(db_folders, file=log_file)
+    check_db(log_file)
+    target_db = 'data/imagenet16_data/lmdb'
+    os.makedirs(target_db, exist_ok=True)
     target_env = lmdb.open(target_db, 
                            map_size=1200*1024*1024*1024, 
                            map_async=True, writemap=True, readahead=False)
-    for db_dir in db_folders:
+    for db_dir, seed in seed_dict.items():
         print(db_dir, file=log_file)
         # merge dbs
-        with lmdb.open(db_dir, map_size=1200*1024*1024*1024, 
-                       map_async=True, writemap=True, readahead=False) as source_env:
+        with lmdb.open(db_dir, map_size=1200*1024*1024*1024, readonly=True, readahead=False) as source_env:
             merge_db(target_env, source_env)
     num_imgs = target_env.stat()['entries']
     print(f'{num_imgs} in the whole database', file=log_file)
@@ -117,4 +133,3 @@ if __name__ == '__main__':
     parser.add_argument('--logpath', type=str, default='/results/merge_db.txt')
     args = parser.parse_args()
     process_fn(args)
-    # generate_labels()
