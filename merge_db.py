@@ -104,7 +104,7 @@ def merge_db(target_env, source_env, remn=0):
         curr_key = f'{curr + count}'.encode()
         target_txn.put(curr_key, value)
         count += 1
-        if count % 2048 == 0:
+        if count % 4096 == 0:
             target_env.sync(True)
             target_txn.commit()
             target_txn = target_env.begin(write=True)
