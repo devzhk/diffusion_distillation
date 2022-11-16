@@ -74,7 +74,7 @@ def delete_db(db_dir):
         shutil.rmtree(db_dir)
 
 
-def check_db(logfile):
+def check_db(logfile, batchsize=2048):
     # read labels
     label_path = 'data/imagenet16_db/labels.npy'
     labels = np.load(label_path)
@@ -83,46 +83,48 @@ def check_db(logfile):
     num_entries = 0
     for key, value in seed_dict.items():
         num_imgs = get_num_imgs(key)
-        print(f'{key} contains {num_imgs} entries', file=logfile)
+        print(f'{key} contains {num_imgs} entries', file=logfile, flush=True)
+        if num_imgs % batchsize != 0:
+            raise ValueError(f'{key} contains incomplete batche!')
         num_entries += num_imgs
     if num_entries == num_labels:
-        print('number of labels matches the number of entries', file=logfile)
+        print('number of labels matches the number of entries!', file=logfile, flush=True)
     else:
         raise ValueError('number of labels does not match the number of entries')
     
 
-def merge_db(target_env, source_env, remn=0):
-    curr = target_env.stat()['entries'] - remn
+def merge_db(target_env, source_env, logfile, batchsize=2048):
+    curr = target_env.stat()['entries']
     num_source = source_env.stat()['entries']
     source_txn = source_env.begin(write=False)
     count = 0
+    num_batch = num_source // batchsize
     
-    target_txn = target_env.begin(write=True)
-
-    cursor = source_txn.cursor()
-    for key, value in cursor:
-        curr_key = f'{curr + count}'.encode()
-        target_txn.put(curr_key, value)
-        count += 1
-        if count % 4096 == 0:
-            target_env.sync(True)
-            target_txn.commit()
-            target_txn = target_env.begin(write=True)
+    for i in range(num_batch):
+        with target_env.begin(write=True) as target_txn:
+            for j in range(batchsize):
+                source_key = f'{count}'.encode()
+                value = source_txn.get(source_key)
+                curr_key = f'{curr + count}'.encode()
+                target_txn.put(curr_key, value)
+                count += 1
+        print(f'{i} batch is written to db', file=logfile, flush=True)
+    print('one data base finished', file=logfile, flush=True)
 
 
 def process_fn(args):
-    log_file = open(args.logpath, 'a+')
+    log_file = open(args.logpath, 'w')
     check_db(log_file)
     target_db = 'data/imagenet16_data/lmdb'
     os.makedirs(target_db, exist_ok=True)
     target_env = lmdb.open(target_db, 
-                           map_size=1200*1024*1024*1024, 
-                           map_async=True, writemap=True, readahead=False)
+                           map_size=1000*1024*1024*1024, 
+                           writemap=True)
     for db_dir, seed in seed_dict.items():
-        print(db_dir, file=log_file)
+        print(db_dir, file=log_file, flush=True)
         # merge dbs
-        with lmdb.open(db_dir, map_size=1200*1024*1024*1024, readonly=True, readahead=False) as source_env:
-            merge_db(target_env, source_env)
+        with lmdb.open(db_dir, map_size=400*1024*1024*1024, readonly=True, readahead=False) as source_env:
+            merge_db(target_env, source_env, log_file)
     num_imgs = target_env.stat()['entries']
     print(f'{num_imgs} in the whole database', file=log_file)
 
@@ -130,6 +132,6 @@ def process_fn(args):
 if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument('--datadir', type=str, default='data')
-    parser.add_argument('--logpath', type=str, default='data/merge_db.txt')
+    parser.add_argument('--logpath', type=str, default='data/merge_db_log.txt')
     args = parser.parse_args()
     process_fn(args)
