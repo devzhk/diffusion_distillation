@@ -130,6 +130,6 @@ def process_fn(args):
 if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument('--datadir', type=str, default='data')
-    parser.add_argument('--logpath', type=str, default='/data/merge_db.txt')
+    parser.add_argument('--logpath', type=str, default='data/merge_db.txt')
     args = parser.parse_args()
     process_fn(args)
