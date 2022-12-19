@@ -87,7 +87,6 @@ def scaled_dot_product(q, k, v):
 
 
 class MultiheadAttnBlock(nn.Module):
-    # TODO: check DenseGeneral vs current NIN
     def __init__(self, channels, num_heads):
         super(MultiheadAttnBlock, self).__init__()
         assert channels % num_heads == 0
