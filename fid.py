@@ -46,7 +46,7 @@ def calculate_inception_stats(
         raise click.ClickException(f'Found {len(dataset_obj)} images, but need at least 2 to compute statistics')
 
     # Other ranks follow.
-    if dist.get_rank() == 0:
+    if dist.get_rank() == 0 and torch.distributed.is_initialized():
         torch.distributed.barrier()
 
     # Divide images into batches.
@@ -60,7 +60,8 @@ def calculate_inception_stats(
     mu = torch.zeros([feature_dim], dtype=torch.float64, device=device)
     sigma = torch.zeros([feature_dim, feature_dim], dtype=torch.float64, device=device)
     for images, _labels in tqdm.tqdm(data_loader, unit='batch', disable=(dist.get_rank() != 0)):
-        torch.distributed.barrier()
+        if torch.distributed.is_initialized():
+            torch.distributed.barrier()
         if images.shape[0] == 0:
             continue
         if images.shape[1] == 1:
@@ -70,8 +71,9 @@ def calculate_inception_stats(
         sigma += features.T @ features
 
     # Calculate grand totals.
-    torch.distributed.all_reduce(mu)
-    torch.distributed.all_reduce(sigma)
+    if torch.distributed.is_initialized():
+        torch.distributed.all_reduce(mu)
+        torch.distributed.all_reduce(sigma)
     mu /= len(dataset_obj)
     sigma -= mu.ger(mu) * len(dataset_obj)
     sigma /= len(dataset_obj) - 1

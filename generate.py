@@ -4,9 +4,12 @@ import numpy as onp
 from argparse import ArgumentParser
 import lmdb
 
-from diffusion_distillation.utils import unnormalize_data
-from utils.helper import save2dir
 from PIL import Image
+
+
+
+def unnormalize_data(x):
+  return (x + 1.) * 127.5
 
 
 def readdb(txn, i, shape):
@@ -41,6 +44,20 @@ def db2jpg(args):
             im.save(img_path, quality=100, subsampling=0)
     print('Done')
 
+
+def db2png(db_dir, outdir, shape, num_imgs=50000):
+    '''
+    convert images from database to jpgs
+    '''
+    env = lmdb.open(db_dir, readonly=True, readahead=False, meminit=False)
+    with env.begin(write=False) as txn:
+        for i in tqdm(range(num_imgs)):
+            img = readdb(txn, i, shape)
+            img = onp.clip(unnormalize_data(img), 0, 255).astype(onp.uint8)
+            im = Image.fromarray(img)
+            img_path = os.path.join(outdir, f'{i}.png')
+            im.save(img_path)
+    print(f'Generate {num_imgs} images to {outdir}')
 
 
 if __name__ == '__main__':

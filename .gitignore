@@ -6,3 +6,4 @@ log
 wandb
 **/__pycache__/**
 .idea
+figs
