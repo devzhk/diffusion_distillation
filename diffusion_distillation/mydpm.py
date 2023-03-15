@@ -177,7 +177,7 @@ class Model:
     return x_pred_t, z_s_pred
 
   def sample_loop(self, params, init_x, y, num_steps,
-                  logsnr_schedule_fn, clip_x, save_step):
+                  logsnr_schedule_fn, clip_x, save_step, pmap=False):
     '''
     Args:
       - init_x: (num_gpus, local_b, *x_shape)
@@ -185,10 +185,11 @@ class Model:
     Return:
       traj: list of (num_gpus, local_b, *x_shape)
     '''    
-
-    ddim_step_fn = jax.pmap(self.ddim_step, axis_name='p', 
-                            static_broadcasted_argnums=[0, 3, 4, 5])
-
+    if pmap:
+      ddim_step_fn = jax.pmap(self.ddim_step, axis_name='p', 
+                              static_broadcasted_argnums=[0, 3, 4, 5])
+    else:
+      ddim_step_fn = self.ddim_step
     zt = init_x
     x_list = [init_x]
     # loop over t = num_steps-1, ..., 0

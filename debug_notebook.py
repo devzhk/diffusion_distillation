@@ -1,74 +1,91 @@
 #%%
-import jax
-import flax
-from flax import serialization
+import os
+from argparse import ArgumentParser
+from tqdm import tqdm
+import pickle
+
 import numpy as onp
+import jax
 import jax.numpy as jnp
+os.environ['XLA_PYTHON_CLIENT_PREALLOCATE']='False'
+os.environ['XLA_PYTHON_CLIENT_ALLOCATOR']='platform'
+import flax
 import diffusion_distillation
-from diffusion_distillation import dpm
-from diffusion_distillation import schedules
+from diffusion_distillation import mydpm, mymodel
+import lmdb
+from PIL import Image
+
+from utils.helper import get_random_label, save2db, gather, load_param, download_ckpt
+
 
 #%%
-ckpt_path = 'ckpts/imagenet_original'
+def save2dir(images, outdir, curr):
+    for i, batch in enumerate(images):
+        num_imgs = batch.shape[0]
+        batch = (batch + 1.0) * 127.5
+        imgs = onp.clip(batch, 0, 255).astype(onp.uint8)
+        for j in range(num_imgs):
+            im = Image.fromarray(imgs[j])
+            img_path = os.path.join(outdir, f'{j}-{i}.png')
+            im.save(img_path)    
+    return curr + num_imgs
+
+#%%
+ckpt_path = 'ckpts/imagenet_16'
+base_dir = 'exp/sample16'
+img_dir = os.path.join(base_dir, 'images')
+os.makedirs(img_dir, exist_ok=True)
+
+x_dir = '../SDE-model/exp/Imagenet-TDDPMm-snr-distill-t4-amp-bx8/random-init'
+
+my_label = 288
+seed = 129
+pkl_path = os.path.join(x_dir, f'state.pkl')
+
+# ckpt_path = 'ckpts/cifar_original'
 # create model 
-config = diffusion_distillation.config.imagenet64_base.get_config()
-teacher = diffusion_distillation.model.Model(config)
-
+config = diffusion_distillation.config.imagenet64_distill.get_config()
+model = mymodel.Model(config)
 # load params
-with open(ckpt_path, 'rb') as f:
-    loaded_params = serialization.from_bytes(target=None, encoded_bytes=f.read())['ema_params']
+loaded_params = load_param(ckpt_path, model)
 
-# fix possible flax version errors
-ema_params = jax.device_get(teacher.make_init_state()).ema_params
-loaded_params = flax.core.unfreeze(loaded_params)
-loaded_params = jax.tree_map(
-    lambda x, y: onp.reshape(x, y.shape) if hasattr(y, 'shape') else x,
-loaded_params,
-flax.core.unfreeze(ema_params))
-loaded_params = flax.core.freeze(loaded_params)
-del ema_params
+logsnr_schedule_fn = diffusion_distillation.schedules.get_logsnr_schedule(
+    config.model.train_logsnr_schedule.name,
+    logsnr_min=config.model.train_logsnr_schedule.logsnr_min,
+    logsnr_max=config.model.train_logsnr_schedule.logsnr_max,
+)
 
-#%%
-def modelfn(params, x, logsnr, y=None):
-    return teacher.model.apply(
+def model_fn(params, x, logsnr, y=None):
+    return model.model.apply(
         {'params': params}, x=x, logsnr=logsnr, y=y, train=False
     )
 
-# 
-model = dpm.Model(
-    model_fn=modelfn, 
+# define sampler
+sampler = mydpm.Model(
+    model_fn=model_fn,
     mean_type=config.model.mean_type, 
     logvar_type=config.model.logvar_type, 
     logvar_coeff=config.model.get('logvar_coeff', 0.))
 
-# prepare model
-logsnr_fn = schedules.get_logsnr_schedule(**config.model.eval_logsnr_schedule)
+sample_key = jax.random.PRNGKey(seed)
+clip_x = config.model.eval_clip_denoised
+#%%
+# load init x and label
+with open(pkl_path, 'rb') as f:
+    state_dict = pickle.load(f)
 
+init_x = state_dict['init_x']
+y = state_dict['y']
 
-# create random init_x
-x_shape = (64, 64, 3)
-B = 2
-init_path = 'exp/init_x.npy'
-out_path = 'exp/out-jax.npy'
-init_x = onp.random.normal(size=(B, *x_shape))
-onp.save(init_path, init_x)
+init_x = jnp.array(init_x.transpose(0, 2, 3, 1))
+y = jnp.array(y)
 
-x = jnp.asarray(init_x)
-print(x.dtype)
-labels = 867 * jnp.ones((B, ), dtype=jnp.int32)
-
-# define model function 
-model_fn = lambda x, logsnr: teacher.model.apply(
-    {'params': loaded_params}, x=x, logsnr=logsnr, y=labels, train=False
-)
-
-
-logsnr_t = logsnr_fn(0.5)
-logsnr = jnp.full((B, ), logsnr_t)
-
-clip_x = False
-
-model_output = model._run_model(z=x, logsnr=logsnr, model_fn=model_fn, clip_x=clip_x)
-
-output = jax.device_get(model_output)
-onp.save(out_path, output)
+#%%
+traj = sampler.sample_loop(loaded_params, init_x, y, num_steps=16, logsnr_schedule_fn=logsnr_schedule_fn, clip_x=clip_x, save_step=1)
+# T, B, H, W, C
+imgs = jax.device_get(traj)
+curr = 0 
+curr = save2dir(imgs, img_dir, curr)
+# %%
+print(init_x.shape)
+# %%
